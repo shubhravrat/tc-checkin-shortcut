@@ -1,33 +1,25 @@
 #!/usr/bin/env python3
 """
-Generate TC-Daily-Checkin-v5.shortcut.
+Generate TC-Daily-Checkin-v6.shortcut.
 
-v5 change vs v3: Diet, Exercise, and Cardio switch from free-text `ask`
-prompts to tap-only `is.workflow.actions.choosefrommenu` (Yes [check] / No
-[cross]). Day, Stress, and Supplements stay as free-text ask actions per
-task scope -- they don't suit a fixed menu.
+v6 changes vs v5:
 
-Built directly on top of v3 (gen_shortcut_v3.py), not v4: v4 was referenced
-in the task brief as an existing baseline with Sleep also pulled from Health
-and reformatted as "H hr M min", but no v4 generator/artifact exists in this
-repo. Reproducing that Sleep pipeline was out of the explicit task steps for
-this conversion, so Sleep here is unchanged from v3 (typed "Sleep (hrs)?").
+1. Bugfix carried in from v5's real-world test: `is.workflow.actions.setvariable`
+   does NOT implicitly pick up the previous action's output -- it needs an
+   explicit WFInput (an ActionOutput ref to the preceding gettext literal) or
+   the variable is set to nil, which is why the first v5 build produced an
+   effectively empty clipboard even though "Copied to Clipboard" still fired.
 
-Choose from Menu serialization (WFControlFlowMode 0/1/2 + shared
-GroupingIdentifier per menu block) verified against real iOS-exported plist
-shapes surfaced via GitHub code search (sundial-org/awesome-openclaw-skills,
-CONTROL_FLOW.md). The menu block itself has no addressable "output" -- the
-action's own JSON schema (WFChooseFromMenuAction) declares no Output key,
-unlike `ask`'s "Provided Input". Referencing a branch-local gettext action's
-UUID directly from the main text would only resolve when that specific
-branch happened to run, silently going empty for the other branch. The
-correct mechanism is a Set Variable action inside each branch, writing a
-common variable name, referenced downstream via a `{"Type": "Variable",
-"VariableName": ...}` WFTextTokenAttachment instead of an ActionOutput one.
+2. TC Day no longer prompts. It reuses the same Formatted Date output already
+   computed for the header, so "TC — Day <n>" now shows today's date instead
+   of a manually typed challenge-day count. One less popup per run.
 
-Health action serialization reference (WFContentPredicateTableTemplate shape,
-Operator 4 = "is" on Type, Operator 1002 = "is today" on Start Date) carried
-over unchanged from gen_shortcut_v3.py.
+3. After copying to clipboard, the shortcut opens the Fittr app
+   (com.squats.fittr) instead of showing the share sheet, so the text is one
+   tap + manual paste away inside Fittr's chat. Share action removed.
+
+Everything else (Health Sum for Water/Steps, Yes/No menus for Diet/Exercise/
+Cardio, typed Sleep/Stress/Supplements) is unchanged from v5.
 """
 import plistlib
 import uuid
@@ -138,9 +130,8 @@ def ask_action(prompt, default):
 def yes_no_menu(prompt, variable_name, yes_label="Yes ✅", no_label="No ❌"):
     """Choose from Menu: two tap options, each branch Sets Variable `variable_name`.
 
-    Returns (actions, variable_name) -- actions is the full ordered list of
-    menu-block actions to splice into the workflow (menu def, one
-    gettext+setvariable pair per case, end menu).
+    Returns the full ordered list of menu-block actions to splice into the
+    workflow (menu def, one gettext+setvariable pair per case, end menu).
     """
     group_id = U()
     items = [yes_label, no_label]
@@ -196,6 +187,9 @@ def yes_no_menu(prompt, variable_name, yes_label="Yes ✅", no_label="No ❌"):
     return actions
 
 
+FITTR_BUNDLE_ID = "com.squats.fittr"  # App Store bundle ID for "FITTR: Health & Fitness App"
+
+
 def build():
     date_uuid = U()
     fmt_date_uuid = U()
@@ -205,8 +199,6 @@ def build():
         "is.workflow.actions.format.date",
         {"UUID": fmt_date_uuid, "WFDateFormat": "d MMM yyyy", "WFDateFormatStyle": "Custom"},
     )
-
-    tc_day_act, tc_day_uuid = ask_action("TC Day number?", "17")
 
     diet_menu_actions = yes_no_menu("Diet?", "Diet")
     exercise_menu_actions = yes_no_menu("Exercise?", "Exercise")
@@ -235,9 +227,10 @@ def build():
     )
 
     # Ready-made attachment refs, one per placeholder in template order.
+    # Day reuses the same Formatted Date output as the header -- no separate ask.
     refs_in_order = [
         output_ref("Formatted Date", fmt_date_uuid),
-        output_ref("Provided Input", tc_day_uuid),
+        output_ref("Formatted Date", fmt_date_uuid),
         variable_ref("Diet"),
         variable_ref("Exercise"),
         variable_ref("Cardio"),
@@ -274,12 +267,14 @@ def build():
     )
 
     setclipboard_act = action("is.workflow.actions.setclipboard", {"UUID": U()})
-    share_act = action("is.workflow.actions.share", {"UUID": U()})
+    openapp_act = action(
+        "is.workflow.actions.openapp",
+        {"UUID": U(), "WFAppIdentifier": FITTR_BUNDLE_ID},
+    )
 
     actions = [
         date_act,
         fmt_date_act,
-        tc_day_act,
         *diet_menu_actions,
         *exercise_menu_actions,
         *cardio_menu_actions,
@@ -292,7 +287,7 @@ def build():
         supplements_act,
         gettext_act,
         setclipboard_act,
-        share_act,
+        openapp_act,
     ]
 
     workflow = {
@@ -348,7 +343,7 @@ def validate(path, expected_action_count):
             assert ref["OutputUUID"] in action_uuids, f"dangling attachment ref {ref} at {rng}"
 
     # Every Set Variable action must carry an explicit WFInput ref that resolves
-    # to a real action UUID -- omitting it sets the variable to nil.
+    # to a real action UUID -- this is the exact bug that shipped in v5.
     for a in actions:
         if a["WFWorkflowActionIdentifier"] != "is.workflow.actions.setvariable":
             continue
@@ -365,6 +360,10 @@ def validate(path, expected_action_count):
     assert predecessor["WFWorkflowActionParameters"]["UUID"] == text_uuid, (
         "setclipboard's implicit input is not the Text action"
     )
+
+    openapp = next(a for a in actions if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.openapp")
+    assert openapp["WFWorkflowActionParameters"]["WFAppIdentifier"] == FITTR_BUNDLE_ID
+    assert actions.index(openapp) == idx + 1, "Open App must immediately follow Set Clipboard"
 
     # Every choosefrommenu block: modes 0/1/1/2 with one shared GroupingIdentifier,
     # WFMenuItemTitle order matches WFMenuItems order.
@@ -387,7 +386,7 @@ def validate(path, expected_action_count):
 
 if __name__ == "__main__":
     wf = build()
-    out_path = "TC-Daily-Checkin-v5.shortcut"
+    out_path = "TC-Daily-Checkin-v6.shortcut"
     with open(out_path, "wb") as f:
         plistlib.dump(wf, f, fmt=plistlib.FMT_BINARY)
-    validate(out_path, expected_action_count=37)
+    validate(out_path, expected_action_count=36)
