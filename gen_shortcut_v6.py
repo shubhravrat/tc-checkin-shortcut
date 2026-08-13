@@ -44,13 +44,6 @@ def output_ref(output_name, output_uuid):
     }
 
 
-def variable_ref(variable_name):
-    return {
-        "Type": "Variable",
-        "VariableName": variable_name,
-    }
-
-
 def health_filter_action(sample_type_label):
     """Find Health Samples: Type is <label> AND Start Date is today."""
     return action(
@@ -187,6 +180,29 @@ def yes_no_menu(prompt, variable_name, yes_label="Yes ✅", no_label="No ❌"):
     return actions
 
 
+def getvariable_action(variable_name):
+    """Get Variable: fetches a named variable's current value as this action's
+    own output (OutputName "Variable"). Used instead of referencing
+    {"Type": "Variable", ...} directly inside the main Text action's
+    attachmentsByRange -- that form is only confirmed for single-value fields
+    (WFInput, WFVariable) in the reference material, never for a multi-slot
+    WFTextTokenString. Routing through Get Variable keeps every attachment in
+    the final Text action on the one mechanism (ActionOutput) that's actually
+    proven to work there.
+    """
+    act = action(
+        "is.workflow.actions.getvariable",
+        {
+            "UUID": U(),
+            "WFVariable": {
+                "Value": {"Type": "Variable", "VariableName": variable_name},
+                "WFSerializationType": "WFTextTokenAttachment",
+            },
+        },
+    )
+    return act, act["WFWorkflowActionParameters"]["UUID"]
+
+
 FITTR_BUNDLE_ID = "com.squats.fittr"  # App Store bundle ID for "FITTR: Health & Fitness App"
 
 
@@ -203,6 +219,10 @@ def build():
     diet_menu_actions = yes_no_menu("Diet?", "Diet")
     exercise_menu_actions = yes_no_menu("Exercise?", "Exercise")
     cardio_menu_actions = yes_no_menu("Cardio?", "Cardio")
+
+    diet_get_act, diet_get_uuid = getvariable_action("Diet")
+    exercise_get_act, exercise_get_uuid = getvariable_action("Exercise")
+    cardio_get_act, cardio_get_uuid = getvariable_action("Cardio")
 
     water_filter_act, water_stats_act, water_stats_uuid = health_metric("Water")
     steps_filter_act, steps_stats_act, steps_stats_uuid = health_metric("Steps")
@@ -231,9 +251,9 @@ def build():
     refs_in_order = [
         output_ref("Formatted Date", fmt_date_uuid),
         output_ref("Formatted Date", fmt_date_uuid),
-        variable_ref("Diet"),
-        variable_ref("Exercise"),
-        variable_ref("Cardio"),
+        output_ref("Variable", diet_get_uuid),
+        output_ref("Variable", exercise_get_uuid),
+        output_ref("Variable", cardio_get_uuid),
         output_ref("Statistics", water_stats_uuid),
         output_ref("Statistics", steps_stats_uuid),
         output_ref("Provided Input", sleep_uuid),
@@ -278,6 +298,9 @@ def build():
         *diet_menu_actions,
         *exercise_menu_actions,
         *cardio_menu_actions,
+        diet_get_act,
+        exercise_get_act,
+        cardio_get_act,
         water_filter_act,
         water_stats_act,
         steps_filter_act,
@@ -331,16 +354,20 @@ def validate(path, expected_action_count):
     attachments = main_gettext["WFWorkflowActionParameters"]["WFTextActionText"]["Value"]["attachmentsByRange"]
     assert len(attachments) == 10, f"expected 10 attachments, got {len(attachments)}"
 
+    for rng, ref in attachments.items():
+        assert ref["OutputUUID"] in action_uuids, f"dangling attachment ref {ref} at {rng}"
+
+    # Every Get Variable action must actually read a name some Set Variable writes.
     variable_names_set = {
         a["WFWorkflowActionParameters"]["WFVariableName"]
         for a in actions
         if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.setvariable"
     }
-    for rng, ref in attachments.items():
-        if ref.get("Type") == "Variable":
-            assert ref["VariableName"] in variable_names_set, f"variable ref {ref} at {rng} has no Set Variable writer"
-        else:
-            assert ref["OutputUUID"] in action_uuids, f"dangling attachment ref {ref} at {rng}"
+    for a in actions:
+        if a["WFWorkflowActionIdentifier"] != "is.workflow.actions.getvariable":
+            continue
+        name = a["WFWorkflowActionParameters"]["WFVariable"]["Value"]["VariableName"]
+        assert name in variable_names_set, f"getvariable {a['WFWorkflowActionParameters']['UUID']} reads unset variable {name}"
 
     # Every Set Variable action must carry an explicit WFInput ref that resolves
     # to a real action UUID -- this is the exact bug that shipped in v5.
@@ -389,4 +416,4 @@ if __name__ == "__main__":
     out_path = "TC-Daily-Checkin-v6.shortcut"
     with open(out_path, "wb") as f:
         plistlib.dump(wf, f, fmt=plistlib.FMT_BINARY)
-    validate(out_path, expected_action_count=36)
+    validate(out_path, expected_action_count=39)
