@@ -9,8 +9,11 @@ the clipboard, and opens the Fittr app so it can be pasted into its chat.
 
 | File | Description |
 | --- | --- |
-| `TC-Daily-Checkin-v6-signed.shortcut` | v6, current. TC Day auto-fills from today's date (no popup); Diet/Exercise/Cardio are tap-to-choose menus; Steps/Water pulled live from Apple Health; copies to clipboard then opens Fittr instead of the share sheet. Signed, import this one. |
-| `TC-Daily-Checkin-v6.shortcut` | v6 unsigned. iOS refuses to import it. |
+| `TC-Daily-Checkin-v7-signed.shortcut` | v7, current. Menu/variable serialization matched against real iOS-exported plists (no stray UUID on menu-def/case/setvariable actions) after v6 still copied an empty Diet/Exercise/Cardio. TC Day auto-fills from today's date (no popup); Diet/Exercise/Cardio are tap-to-choose menus; Steps/Water pulled live from Apple Health; copies to clipboard then opens Fittr instead of the share sheet. Signed, import this one. |
+| `TC-Daily-Checkin-v7.shortcut` | v7 unsigned. iOS refuses to import it. |
+| `gen_shortcut_v7.py` | Generator for v7. |
+| `TC-Daily-Checkin-v6-signed.shortcut` | v6, legacy. Same feature set as v7 but with a menu/setvariable serialization bug -- copied text with Diet/Exercise/Cardio empty. |
+| `TC-Daily-Checkin-v6.shortcut` | v6 unsigned. |
 | `gen_shortcut_v6.py` | Generator for v6. |
 | `TC-Daily-Checkin-v5-signed.shortcut` | v5, legacy. Diet/Exercise/Cardio tap-to-choose menus; Day/Stress/Supplements typed; Steps/Water from Health; ends with the share sheet. |
 | `TC-Daily-Checkin-v5.shortcut` | v5 unsigned. |
@@ -24,7 +27,7 @@ the clipboard, and opens the Fittr app so it can be pasted into its chat.
 ## Install on iPhone
 
 1. Open this link in Safari on the iPhone:
-   https://github.com/shubhravrat/tc-checkin-shortcut/raw/main/TC-Daily-Checkin-v6-signed.shortcut
+   https://github.com/shubhravrat/tc-checkin-shortcut/raw/main/TC-Daily-Checkin-v7-signed.shortcut
 2. The file downloads to Files.
 3. Tap the download, then **Add Shortcut**.
 4. First run will prompt for Health read permission (Steps, Water) and
@@ -36,6 +39,6 @@ If the shortcut is edited, re-sign it on a Mac before importing:
 
 ```
 shortcuts sign --mode anyone \
-  --input TC-Daily-Checkin-v6.shortcut \
-  --output TC-Daily-Checkin-v6-signed.shortcut
+  --input TC-Daily-Checkin-v7.shortcut \
+  --output TC-Daily-Checkin-v7-signed.shortcut
 ```
