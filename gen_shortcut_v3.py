@@ -31,12 +31,9 @@ def action(identifier, params):
 
 def output_ref(output_name, output_uuid):
     return {
-        "Value": {
-            "OutputName": output_name,
-            "OutputUUID": output_uuid,
-            "Type": "ActionOutput",
-        },
-        "WFSerializationType": "WFTextTokenAttachment",
+        "OutputName": output_name,
+        "OutputUUID": output_uuid,
+        "Type": "ActionOutput",
     }
 
 
@@ -91,29 +88,34 @@ def statistics_sum_action():
     )
 
 
-def ask_action(prompt, default, uid, input_type="Text"):
-    return action(
+def health_metric(sample_type_label):
+    """Find Health Samples (today) -> Calculate Statistics (Sum) for one sample type.
+
+    Returns (filter_action, stats_action, stats_uuid) -- stats_uuid is what
+    downstream text attachments wire into.
+    """
+    filter_act = health_filter_action(sample_type_label)
+    stats_act = statistics_sum_action()
+    stats_uuid = stats_act["WFWorkflowActionParameters"]["UUID"]
+    return filter_act, stats_act, stats_uuid
+
+
+def ask_action(prompt, default):
+    act = action(
         "is.workflow.actions.ask",
         {
-            "UUID": uid,
+            "UUID": U(),
             "WFAskActionDefaultAnswer": default,
             "WFAskActionPrompt": prompt,
-            "WFInputType": input_type,
+            "WFInputType": "Text",
         },
     )
+    return act, act["WFWorkflowActionParameters"]["UUID"]
 
 
 def build():
     date_uuid = U()
     fmt_date_uuid = U()
-
-    tc_day_uuid = U()
-    diet_uuid = U()
-    exercise_uuid = U()
-    cardio_uuid = U()
-    sleep_uuid = U()
-    stress_uuid = U()
-    supplements_uuid = U()
 
     date_act = action("is.workflow.actions.date", {"UUID": date_uuid})
     fmt_date_act = action(
@@ -121,24 +123,17 @@ def build():
         {"UUID": fmt_date_uuid, "WFDateFormat": "d MMM yyyy", "WFDateFormatStyle": "Custom"},
     )
 
-    tc_day_act = ask_action("TC Day number?", "17", tc_day_uuid)
-    diet_act = ask_action("Diet?", "Yes ✅", diet_uuid)
-    exercise_act = ask_action("Exercise?", "Yes ✅", exercise_uuid)
-    cardio_act = ask_action("Cardio?", "No ❌", cardio_uuid)
+    tc_day_act, tc_day_uuid = ask_action("TC Day number?", "17")
+    diet_act, diet_uuid = ask_action("Diet?", "Yes ✅")
+    exercise_act, exercise_uuid = ask_action("Exercise?", "Yes ✅")
+    cardio_act, cardio_uuid = ask_action("Cardio?", "No ❌")
 
-    water_filter_act = health_filter_action("Water")
-    water_filter_uuid = water_filter_act["WFWorkflowActionParameters"]["UUID"]
-    water_stats_act = statistics_sum_action()
-    water_stats_uuid = water_stats_act["WFWorkflowActionParameters"]["UUID"]
+    water_filter_act, water_stats_act, water_stats_uuid = health_metric("Water")
+    steps_filter_act, steps_stats_act, steps_stats_uuid = health_metric("Steps")
 
-    steps_filter_act = health_filter_action("Steps")
-    steps_filter_uuid = steps_filter_act["WFWorkflowActionParameters"]["UUID"]
-    steps_stats_act = statistics_sum_action()
-    steps_stats_uuid = steps_stats_act["WFWorkflowActionParameters"]["UUID"]
-
-    sleep_act = ask_action("Sleep (hrs)?", "6", sleep_uuid)
-    stress_act = ask_action("Stress (x/10)?", "2/10", stress_uuid)
-    supplements_act = ask_action("Supplements?", "Whey, creatine", supplements_uuid)
+    sleep_act, sleep_uuid = ask_action("Sleep (hrs)?", "6")
+    stress_act, stress_uuid = ask_action("Stress (x/10)?", "2/10")
+    supplements_act, supplements_uuid = ask_action("Supplements?", "Whey, creatine")
 
     # ---- text template with UTF-16 offset computation ----
     PH = "￼"  # Object Replacement Character used by Shortcuts for attachments
@@ -174,11 +169,7 @@ def build():
     for ch in template:
         if ch == PH:
             out_name, out_uuid = refs_in_order[ref_idx]
-            attachments[f"{{{pos}, 1}}"] = {
-                "OutputName": out_name,
-                "OutputUUID": out_uuid,
-                "Type": "ActionOutput",
-            }
+            attachments[f"{{{pos}, 1}}"] = output_ref(out_name, out_uuid)
             ref_idx += 1
         pos += 2 if ord(ch) > 0xFFFF else 1
     assert ref_idx == len(refs_in_order), "placeholder/reference count mismatch"
